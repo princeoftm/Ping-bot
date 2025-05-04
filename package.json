@@ -1,0 +1,24 @@
+{
+  "name": "sepolia_ping",
+  "version": "1.0.0",
+  "description": "This script listens for `Ping` events on an Ethereum contract, processes them by sending a `Pong` response, and includes retry logic to handle transaction failures using exponential backoff.",
+  "homepage": "https://github.com/princeoftm/sepolia_ping#readme",
+  "bugs": {
+    "url": "https://github.com/princeoftm/sepolia_ping/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/princeoftm/sepolia_ping.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "fs": "^0.0.1-security",
+    "web3": "^4.16.0"
+  }
+}
