@@ -63,7 +63,7 @@ This script listens for `Ping` events on an Ethereum contract, processes them by
    Run the script using Node.js:
 
    ```bash
-   node script.js
+   node index.js
    ```
 
    This will start listening for `Ping` events, process transactions, and handle retries.
