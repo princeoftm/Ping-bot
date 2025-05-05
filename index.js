@@ -399,3 +399,4 @@ function scheduleMissedPingCheck() {
     scheduleFailedTxRetries();
     console.log(`🚀 Monitoring ${eventName} events on contract: ${contractAddress}`);
 })();
+setupMainSubscription();
