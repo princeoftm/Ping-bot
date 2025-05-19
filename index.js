@@ -160,46 +160,53 @@ async function handleFallback() {
 }
 
 // Re-fetch missed events from the last saved block
+// Re-fetch missed events from the last saved block in 500-block chunks
 async function catchUpMissedEvents(contract, lastBlockProcessed) {
-    const latestBlock = await web3Main.eth.getBlockNumber();
     contract = new web3Main.eth.Contract(contractABI, contractAddress);
-
     const data = JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8'));
 
     if (lastBlockProcessed === undefined) {
-        lastBlockProcessed = data.lastProcessedBlock;  
+        lastBlockProcessed = Number(data.lastProcessedBlock);
+    } else {
+        lastBlockProcessed = Number(lastBlockProcessed);
     }
+
+    let latestBlock = Number(await web3Main.eth.getBlockNumber());
 
     if (lastBlockProcessed > latestBlock) {
         console.warn(`⚠️ Last saved block (${lastBlockProcessed}) is ahead of latest (${latestBlock}). Resetting.`);
         lastBlockProcessed = latestBlock;
     }
 
-    console.log(`🔎 Retrieving events from block ${lastBlockProcessed} to ${latestBlock}`);
-    
-    try {
-        const events = await contract.getPastEvents('Ping', {
-            fromBlock: lastBlockProcessed,
-            toBlock: latestBlock,
-        });
+    console.log(`🔎 Retrieving events from block ${lastBlockProcessed} to ${latestBlock} in chunks...`);
 
-        if (!events || events.length === 0) {
-            console.log('ℹ️ No historical events found.');
-            await saveProgress();
+    const CHUNK_SIZE = 500;
+    for (let fromBlock = lastBlockProcessed; fromBlock <= latestBlock; fromBlock += CHUNK_SIZE + 1) {
+        const toBlock = Math.min(fromBlock + CHUNK_SIZE, latestBlock);
+
+        try {
+            const events = await contract.getPastEvents('Ping', {
+                fromBlock,
+                toBlock,
+            });
+
+            if (events.length > 0) {
+                console.log(`🔍 Retrieved ${events.length} events from block ${fromBlock} to ${toBlock}`);
+            }
+
+            for (const event of events) {
+                await handlePingEvent(event);
+            }
+
+            lastProcessedBlock = toBlock;
+            await saveProgress(); // Save after each chunk
+
+        } catch (error) {
+            console.error(`❌ Failed to fetch events from block ${fromBlock} to ${toBlock}:`, error.message);
         }
-
-        console.log(`🔍 Retrieved ${events.length} events.`);
-
-        for (const event of events) {
-            console.log(event);
-            await handlePingEvent(event);
-        }
-
-        await saveProgress();
-        setupMainSubscription();
-    } catch (error) {
-        console.error('❌ Failed to fetch past events:', error);
     }
+
+    setupMainSubscription(); // Reconnect live subscription after catching up
 }
 
 // Restart main subscription with alternate provider
