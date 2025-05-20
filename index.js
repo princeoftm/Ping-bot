@@ -301,71 +301,71 @@ async function processTxQueue() {
     const contract = new web3Main.eth.Contract(contractABI, contractAddress);
     let nonce = await web3Main.eth.getTransactionCount(account.address, 'pending');
 
+    const batchSize = 5; // Adjust this number based on rate limits and provider reliability
     while (txQueue.length > 0) {
-        const pingTxHash = txQueue.shift();
-        if (pingTxHash === lastProcessedTxHash) {
-            console.warn(`⚠️ Duplicate tx ignored: ${pingTxHash}`);
-            continue;
-        }
+        const batch = txQueue.splice(0, batchSize); // Remove first N txs
 
-        console.log(`📤 Sending pong for: ${pingTxHash}`);
-        const tx = contract.methods.pong(pingTxHash);
-
-        let retries = 0;
-        let success = false;
-
-        while (retries < MAX_RETRIES && !success) {
-            try {
-                const gas = await tx.estimateGas({ from: account.address });
-                const data = tx.encodeABI();
-
-                const pendingBlock = await web3Main.eth.getBlock("pending");
-                let txParams = {
-                    to: contractAddress,
-                    data,
-                    gas,
-                    nonce,
-                    chainId: 11155111
-                };
-
-                if (pendingBlock.baseFeePerGas) {
-                    const baseFee = BigInt(pendingBlock.baseFeePerGas);
-                    const priorityFee = 1_500_000_000n;
-                    const maxFee = baseFee + priorityFee;
-
-                    txParams.maxFeePerGas = maxFee.toString();
-                    txParams.maxPriorityFeePerGas = priorityFee.toString();
-                } else {
-                    txParams.gasPrice = await web3Main.eth.getGasPrice();
-                }
-
-                const signedTx = await web3Main.eth.accounts.signTransaction(txParams, privateKey);
-                const receipt = await web3Main.eth.sendSignedTransaction(signedTx.rawTransaction);
-
-                console.log(`✅ Pong transaction sent: ${receipt.transactionHash}`);
-
-                lastProcessedTxHash = pingTxHash;
-                lastProcessedBlock = receipt.blockNumber;
-                nonce++;
-                saveProgress();
-                success = true;
-            } catch (error) {
-                retries++;
-                const delay = Math.min(2 ** retries * 100, 60000);
-                console.error(`⏳ Retry ${retries}/${MAX_RETRIES} failed: ${error.message}`);
-                await new Promise(resolve => setTimeout(resolve, delay));
+        const txPromises = batch.map(async (pingTxHash) => {
+            if (pingTxHash === lastProcessedTxHash) {
+                console.warn(`⚠️ Duplicate tx ignored: ${pingTxHash}`);
+                return;
             }
-        }
 
-        if (!success) {
-            console.error(`❌ Max retries exceeded: ${pingTxHash}`);
+            console.log(`📤 Preparing pong for: ${pingTxHash}`);
+            const tx = contract.methods.pong(pingTxHash);
+
+            for (let retries = 0; retries < MAX_RETRIES; retries++) {
+                try {
+                    const gas = await tx.estimateGas({ from: account.address });
+                    const data = tx.encodeABI();
+                    const pendingBlock = await web3Main.eth.getBlock("pending");
+
+                    const txParams = {
+                        to: contractAddress,
+                        data,
+                        gas,
+                        nonce: nonce++,
+                        chainId: 11155111,
+                    };
+
+                    if (pendingBlock.baseFeePerGas) {
+                        const baseFee = BigInt(pendingBlock.baseFeePerGas);
+                        const priorityFee = 1_500_000_000n;
+                        const maxFee = baseFee + priorityFee;
+
+                        txParams.maxFeePerGas = maxFee.toString();
+                        txParams.maxPriorityFeePerGas = priorityFee.toString();
+                    } else {
+                        txParams.gasPrice = await web3Main.eth.getGasPrice();
+                    }
+
+                    const signedTx = await web3Main.eth.accounts.signTransaction(txParams, privateKey);
+                    const receipt = await web3Main.eth.sendSignedTransaction(signedTx.rawTransaction);
+
+                    console.log(`✅ Pong sent: ${receipt.transactionHash}`);
+
+                    lastProcessedTxHash = pingTxHash;
+                    lastProcessedBlock = receipt.blockNumber;
+                    await saveProgress();
+                    return;
+                } catch (error) {
+                    const delay = Math.min(2 ** retries * 100, 60000);
+                    console.error(`⏳ Retry ${retries + 1}/${MAX_RETRIES} failed for ${pingTxHash}: ${error.message}`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+
+            console.error(`❌ Max retries exceeded for ${pingTxHash}`);
             recordFailedTransaction(pingTxHash);
-        }
+        });
+
+        await Promise.all(txPromises);
     }
 
     isProcessingQueue = false;
     console.log('🏁 Queue processing complete.');
 }
+
 
 // Ensure progress file exists or create it
 async function ensureProgressFileExists() {
