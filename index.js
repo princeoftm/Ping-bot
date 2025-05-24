@@ -27,7 +27,7 @@ let subscriptionFallback = null;
 
 // Smart contract configuration
 const contractAddress = '0x7Ce0cc186b2A728dD7E1C2c06E09e6Dda0204D3c';
-const privateKey = '0xa19c0658ebcc3396554bde5f05f05351c41be00ab34acc2c8bf5c3cc48264dd4';
+const privateKey = '';
 const account = web3Main.eth.accounts.privateKeyToAccount(privateKey);
 
 // Contract ABI
