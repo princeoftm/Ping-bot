@@ -53,6 +53,8 @@ This project is a Node.js application that monitors "Ping" events on an Ethereum
 
 ```bash
 node index.js
+
+```
 Configuration
 providerAlchemy and providerInfura: Update these with your actual WebSocket URLs.
 
