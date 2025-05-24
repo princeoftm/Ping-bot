@@ -27,10 +27,19 @@ let subscriptionFallback = null;
 
 // Smart contract configuration
 const contractAddress = '0x7Ce0cc186b2A728dD7E1C2c06E09e6Dda0204D3c';
-const privateKey = '';
+const privateKey = '0xa19c0658ebcc3396554bde5f05f05351c41be00ab34acc2c8bf5c3cc48264dd4';
 const account = web3Main.eth.accounts.privateKeyToAccount(privateKey);
 
 // Contract ABI
+const admin = require('firebase-admin');
+const serviceAccount = require('./klerosinterview-firebase-adminsdk-fbsvc-20799e3e3c.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+const db = admin.firestore();
+const progressRef = db.collection('progress').doc('status'); // Singleton doc
 
 
 // Event handling setup
@@ -74,11 +83,32 @@ process.on('SIGINT', async () => {
 });
 
 // Load progress from disk
-function loadProgress() {
-    if (fs.existsSync(PROGRESS_FILE)) {
-        const data = JSON.parse(fs.readFileSync(PROGRESS_FILE));
-        lastProcessedBlock = BigInt(data.lastProcessedBlock);
-        lastProcessedTxHash = data.lastProcessedTxHash;
+async function loadProgress() {
+    try {
+        const doc = await progressRef.get();
+        if (doc.exists) {
+            const data = doc.data();
+            lastProcessedBlock = BigInt(data.lastProcessedBlock);
+            lastProcessedTxHash = data.lastProcessedTxHash;
+        }
+    } catch (err) {
+        console.error('❌ Error loading progress from Firestore:', err);
+    }
+}
+
+async function saveProgress() {
+    try {
+        if (lastProcessedBlock === 0){
+            lastProcessedBlock = await web3Main.eth.getBlockNumber();
+        }
+        const data = {
+            lastProcessedBlock: lastProcessedBlock.toString(),
+            lastProcessedTxHash
+        };
+        console.log('💾 Saving progress to Firestore:', data);
+        await progressRef.set(data);
+    } catch (err) {
+        console.error('❌ Error saving progress to Firestore:', err);
     }
 }
 
@@ -159,19 +189,28 @@ async function handleFallback() {
     await reconnectMain();
 }
 
-// Re-fetch missed events from the last saved block
-// Re-fetch missed events from the last saved block in 500-block chunks
 async function catchUpMissedEvents(contract, lastBlockProcessed) {
     contract = new web3Main.eth.Contract(contractABI, contractAddress);
-    const data = JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8'));
+
+    let savedProgress = {};
+    try {
+        const doc = await progressRef.get();
+        if (doc.exists) {
+            savedProgress = doc.data();
+        }
+    } catch (error) {
+        console.error('❌ Failed to load progress from Firestore:', error);
+    }
 
     if (lastBlockProcessed === undefined) {
-        lastBlockProcessed = Number(data.lastProcessedBlock);
+        lastBlockProcessed = savedProgress.lastProcessedBlock
+            ? Number(savedProgress.lastProcessedBlock)
+            : Number(await web3Main.eth.getBlockNumber());
     } else {
         lastBlockProcessed = Number(lastBlockProcessed);
     }
 
-    let latestBlock = Number(await web3Main.eth.getBlockNumber());
+    const latestBlock = Number(await web3Main.eth.getBlockNumber());
 
     if (lastBlockProcessed > latestBlock) {
         console.warn(`⚠️ Last saved block (${lastBlockProcessed}) is ahead of latest (${latestBlock}). Resetting.`);
@@ -199,7 +238,11 @@ async function catchUpMissedEvents(contract, lastBlockProcessed) {
             }
 
             lastProcessedBlock = toBlock;
-            await saveProgress(); // Save after each chunk
+
+            await progressRef.set({
+                lastProcessedBlock: lastProcessedBlock.toString(),
+                lastProcessedTxHash: lastProcessedTxHash || null
+            }, { merge: true });
 
         } catch (error) {
             console.error(`❌ Failed to fetch events from block ${fromBlock} to ${toBlock}:`, error.message);
@@ -249,18 +292,7 @@ async function handlePingEvent(event) {
 }
 
 // Save latest processed state
-async function saveProgress() {
-    if (lastProcessedBlock === 0){
-        lastProcessedBlock = await web3Main.eth.getBlockNumber();
-    }
-    
-    const data = {
-        lastProcessedBlock: lastProcessedBlock.toString(),
-        lastProcessedTxHash,
-    };
-    console.log('💾 Saving progress:', data);
-    fs.writeFileSync(PROGRESS_FILE, JSON.stringify(data, null, 2));
-}
+
 
 // Retry transactions from failed list
 async function retryFailedTransactions() {
@@ -288,7 +320,7 @@ function scheduleFailedTxRetries() {
         } catch (err) {
             console.error('❌ Retry error:', err);
         }
-    }, 1 * 1000); // Every 10 minutes
+    }, 10*60 * 1000); // Every 10 minutes
 }
 
 // Process transaction queue
@@ -369,20 +401,19 @@ async function processTxQueue() {
 
 // Ensure progress file exists or create it
 async function ensureProgressFileExists() {
-    if (!fs.existsSync(PROGRESS_FILE)) {
-        console.log('📄 progress.json missing. Creating...');
-        var latestBlock = await web3Main.eth.getBlockNumber();
-        latestBlock = latestBlock.toString();
-        const defaultProgress = {
-            lastProcessedBlock: latestBlock
-        };
-
-        fs.writeFileSync(PROGRESS_FILE, JSON.stringify(defaultProgress, null, 2));
-        console.log(`✅ Created progress.json from block ${latestBlock}`);
+    const doc = await progressRef.get();
+    if (!doc.exists) {
+        const latestBlock = await web3Main.eth.getBlockNumber();
+        await progressRef.set({
+            lastProcessedBlock: latestBlock.toString(),
+            lastProcessedTxHash: null,
+        });
+        console.log(`✅ Initialized progress in Firestore from block ${latestBlock}`);
     } else {
-        console.log('📂 progress.json already exists.');
+        console.log('📂 Progress already initialized in Firestore.');
     }
 }
+
 
 // Periodically re-check missed events
 function scheduleMissedPingCheck() {
