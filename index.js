@@ -39,8 +39,7 @@ admin.initializeApp({
 });
 
 const db = admin.firestore();
-const progressRef = db.collection('progress').doc('status'); // Singleton doc
-
+const progressRef = db.collection('progress').doc('status'); 
 
 // Event handling setup
 const eventName = 'Ping';

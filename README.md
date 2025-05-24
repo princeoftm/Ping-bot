@@ -1,115 +1,98 @@
-
-# **Transaction Resender with Retry Logic**
-
-This script listens for `Ping` events on an Ethereum contract, processes them by sending a `Pong` response, and includes retry logic to handle transaction failures using exponential backoff.
-
-### **Features**
-
-- **Event Listening**: Listens for `Ping` events on the contract.
-- **Transaction Processing**: Sends a `Pong` response for each `Ping` event.
-- **Exponential Retry Logic**: Retries failed transactions up to a specified number of attempts (up to 140 retries by default) with exponential backoff.
-- **Failed Transactions**: Keeps track of failed transactions in a `failed_transactions.json` file and retries them later.
-- **Automatic Retries**: Failed transactions are automatically retried on script startup and periodically thereafter (every 10 minutes).
-- **Graceful Shutdown**: Handles graceful shutdown, ensuring that progress is saved, and subscriptions are unsubscribed.
-
 ---
+# Ping-Pong Bot
 
-### **Prerequisites**
+This project is a Node.js application that monitors "Ping" events on an Ethereum smart contract and automatically sends a "Pong" transaction in response. It's designed for high availability and resilience, featuring WebSocket provider failover, transaction retries, and progress persistence.
 
-1. **Node.js**: Make sure Node.js is installed on your machine.
-   - [Download Node.js](https://nodejs.org/)
-   
-2. **Install Dependencies**: 
+## Features
 
-   Run the following command to install the necessary packages:
+* **Real-time Event Monitoring:** Subscribes to `Ping` events from a specified smart contract.
+* **Automated "Pong" Response:** Automatically constructs and sends a `pong` transaction for each detected `Ping` event.
+* **WebSocket Provider Failover:** Seamlessly switches between Alchemy and Infura WebSocket providers if the primary connection experiences issues.
+* **Transaction Retries:** Implements an exponential backoff strategy for failed "Pong" transactions to maximize success rates.
+* **Persistent Progress Tracking:** Saves the last processed block and transaction hash to Firestore, enabling the bot to resume operations from where it left off after restarts.
+* **Missed Event Catch-up:** Periodically checks for and processes any `Ping` events that might have been missed due to downtime or network interruptions.
+* **Failed Transaction Logging:** Records unrecoverable failed transactions to a local file (`failed_transactions.json`) for later inspection and manual retry.
+* **Graceful Shutdown:** Ensures that progress is saved and subscriptions are properly closed on application termination (e.g., via `Ctrl+C`).
 
-   ```bash
-   npm install web3 fs
-   ```
+## Getting Started
 
----
+### Prerequisites
 
-### **Setup**
+* Node.js (LTS version recommended)
+* A Sepolia Ethereum account with some test ETH
+* Alchemy and Infura WebSocket API keys (or similar providers)
+* Firebase project setup with a service account key for Firestore access.
 
-1. **Configure Web3 Providers and Contract Information**
+### Installation
 
-   Open the script file and modify the following variables:
+1.  **Clone the repository:**
+    ```bash
+    git clone [repository_url]
+    cd [repository_name]
+    ```
 
-   - **`providerAlchemy`**: Your Alchemy WebSocket provider URL.
-   - **`providerInfura`**: Your Infura WebSocket provider URL.
-   - **`contractABI`**: The ABI of the contract you're interacting with.
-   - **`contractAddress`**: The address of the Ethereum contract you're monitoring.
-   - **`privateKey`**: The private key used to sign transactions.(Please use .env if you're putting it online ;( )
+2.  **Install dependencies:**
+    ```bash
+    npm install web3 dotenv firebase-admin
+    ```
 
-   Example:
-   ```js
-   const providerAlchemy = 'wss://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY';
-   const providerInfura = 'wss://sepolia.infura.io/ws/v3/YOUR_INFURA_API_KEY';
-   const contractABI = [...];  // Your contract ABI here
-   const contractAddress = '0xYourContractAddress';
-   const privateKey = '0xYourPrivateKey';
-   ```
+3.  **Environment Variables:**
+    Create a `.env` file in the project root and add your private key:
+    ```
+    PRIVATE_KEY="your_ethereum_private_key_here"
+    ```
+    **Note:** For production environments, consider more secure methods for handling private keys.
 
-2. **Progress File (`progress.json`)**
+4.  **Firebase Service Account Key:**
+    Download your Firebase service account key JSON file and place it in the project root, named `klerosinterview-firebase-adminsdk-fbsvc-20799e3e3c.json`.
 
-   The script automatically creates and updates a file called `progress.json` to store the last processed block and transaction hash. If this file does not exist, the script will create it for you.
+5.  **Smart Contract ABI and Address:**
+    Ensure the `contractABI` array and `contractAddress` variable in `index.js` are correctly set for your deployed "Ping-Pong" contract.
 
----
+### Running the Bot
 
-### **How to Run**
+```bash
+node index.js
+Configuration
+providerAlchemy and providerInfura: Update these with your actual WebSocket URLs.
+contractAddress: The address of your deployed smart contract.
+privateKey: The private key of the Ethereum account that will send "Pong" transactions.
+MAX_RETRIES: Maximum number of times to retry sending a "Pong" transaction.
+FAILED_TX_FILE: Path to the file where failed transaction hashes are stored.
+PROGRESS_FILE: (Deprecated in favor of Firestore) Path to the file for saving progress (now uses Firestore).
+CHUNK_SIZE: (in catchUpMissedEvents) Determines the number of blocks to fetch at once when catching up on past events.
+Retry Intervals: The scheduleFailedTxRetries and scheduleMissedPingCheck functions define how often the bot attempts to retry failed transactions and check for missed events, respectively.
+How it Works
+Initialization:
 
-1. **Start the Script**
+Loads the last processed block and transaction hash from Firestore.
+Attempts to retry any previously failed transactions.
+Initializes a connection to the primary WebSocket provider (Alchemy).
+Event Subscription:
 
-   Run the script using Node.js:
+Subscribes to the Ping event on the specified smart contract.
+Event Handling (handlePingEvent):
 
-   ```bash
-   node index.js
-   ```
+When a Ping event is received, its transaction hash is added to a processing queue.
+Queue Processing (processTxQueue):
 
-   This will start listening for `Ping` events, process transactions, and handle retries.
+Processes transactions from the queue in batches.
+For each Ping transaction hash, it constructs and signs a pong transaction.
+Includes logic for EIP-1559 gas estimation if the network supports it.
+Sends the signed transaction to the Ethereum network.
+If a transaction fails, it retries with exponential backoff.
+If max retries are exceeded, the transaction hash is recorded in failed_transactions.json.
+Updates the last processed block and transaction hash in Firestore upon successful "Pong" transmission.
+Failover (handleFallback, reconnectMain):
 
-2. **Graceful Shutdown**
+If the primary WebSocket connection encounters an error or closes, the bot attempts to switch to the fallback provider (Infura).
+It then attempts to reconnect to the original main provider after a short delay.
+Catch-up (catchUpMissedEvents):
 
-   The script will handle graceful shutdown if you press `Ctrl+C`. It will save progress and unsubscribe from the event listeners.
+Periodically queries past Ping events from the smart contract, starting from the last processed block, to ensure no events were missed during downtime.
+Failed Transaction Retries (retryFailedTransactions, scheduleFailedTxRetries):
 
----
+On startup and at regular intervals, the bot reads the failed_transactions.json file and re-queues any un-sent "Pong" transactions for another attempt.
+Graceful Shutdown:
 
-### **File Descriptions**
-
-- **`progress.json`**: Tracks the last processed block and transaction hash to avoid replaying transactions.
-- **`failed_transactions.json`**: Stores the transaction hashes of failed transactions. These transactions will be retried automatically on script restart or based on the retry schedule.
-
----
-
-### **Exponential Retry Logic**
-
-- Failed transactions will be retried with exponential backoff. The script will attempt the transaction again after 5 seconds, then 10 seconds, then 20 seconds, and so on, up to a maximum of 140 retries.
-- After 140 retries, the transaction will be considered permanently failed and will be saved in `failed_transactions.json` for manual review.
-
----
-
-### **Periodic Retry of Failed Transactions**
-
-- Every 10 minutes, the script will check the `failed_transactions.json` file and attempt to resend any transactions that failed previously.
-- Failed transactions will also be retried on startup, if any are found in the `failed_transactions.json` file.
-
----
-
-### **Customizations**
-
-1. **Retry Interval**: You can change the retry interval or the number of retries by adjusting the variables in the script.
-   
-2. **Event Name**: If your contract emits different event names, you can update the `eventName` variable to reflect the correct event.
-
----
-
-### **Troubleshooting**
-
-- **Failed to connect to WebSocket**: Ensure your WebSocket URLs are correct and that you have a valid API key for Alchemy or Infura.
-- **Transaction Gas Limit Exceeded**: Ensure that the transaction's gas limit is correctly estimated and sufficient.
-
----
-
-### **License**
-
-MIT License
+On SIGINT (Ctrl+C), the bot saves its current progress to Firestore and unsubscribes from all active WebSocket connections before exiting.
