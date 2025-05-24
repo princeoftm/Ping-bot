@@ -218,7 +218,7 @@ async function catchUpMissedEvents(contract, lastBlockProcessed) {
 
     console.log(`🔎 Retrieving events from block ${lastBlockProcessed} to ${latestBlock} in chunks...`);
 
-    const CHUNK_SIZE = 500;
+    const CHUNK_SIZE = 499;
     for (let fromBlock = lastBlockProcessed; fromBlock <= latestBlock; fromBlock += CHUNK_SIZE + 1) {
         const toBlock = Math.min(fromBlock + CHUNK_SIZE, latestBlock);
 
