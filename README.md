@@ -55,21 +55,31 @@ This project is a Node.js application that monitors "Ping" events on an Ethereum
 node index.js
 Configuration
 providerAlchemy and providerInfura: Update these with your actual WebSocket URLs.
+
 contractAddress: The address of your deployed smart contract.
+
 privateKey: The private key of the Ethereum account that will send "Pong" transactions.
+
 MAX_RETRIES: Maximum number of times to retry sending a "Pong" transaction.
+
 FAILED_TX_FILE: Path to the file where failed transaction hashes are stored.
+
 PROGRESS_FILE: (Deprecated in favor of Firestore) Path to the file for saving progress (now uses Firestore).
+
 CHUNK_SIZE: (in catchUpMissedEvents) Determines the number of blocks to fetch at once when catching up on past events.
+
 Retry Intervals: The scheduleFailedTxRetries and scheduleMissedPingCheck functions define how often the bot attempts to retry failed transactions and check for missed events, respectively.
+
+
 How it Works
+
 Initialization:
 
 Loads the last processed block and transaction hash from Firestore.
 Attempts to retry any previously failed transactions.
 Initializes a connection to the primary WebSocket provider (Alchemy).
-Event Subscription:
 
+Event Subscription:
 Subscribes to the Ping event on the specified smart contract.
 Event Handling (handlePingEvent):
 
@@ -77,22 +87,34 @@ When a Ping event is received, its transaction hash is added to a processing que
 Queue Processing (processTxQueue):
 
 Processes transactions from the queue in batches.
+
 For each Ping transaction hash, it constructs and signs a pong transaction.
+
 Includes logic for EIP-1559 gas estimation if the network supports it.
+
 Sends the signed transaction to the Ethereum network.
+
 If a transaction fails, it retries with exponential backoff.
+
 If max retries are exceeded, the transaction hash is recorded in failed_transactions.json.
-Updates the last processed block and transaction hash in Firestore upon successful "Pong" transmission.
+
+Updates the last processed block and transaction hash in Firestore upon successful "Pong" 
+transmission.
+
 Failover (handleFallback, reconnectMain):
 
+
 If the primary WebSocket connection encounters an error or closes, the bot attempts to switch to the fallback provider (Infura).
+
 It then attempts to reconnect to the original main provider after a short delay.
 Catch-up (catchUpMissedEvents):
 
 Periodically queries past Ping events from the smart contract, starting from the last processed block, to ensure no events were missed during downtime.
+
 Failed Transaction Retries (retryFailedTransactions, scheduleFailedTxRetries):
 
 On startup and at regular intervals, the bot reads the failed_transactions.json file and re-queues any un-sent "Pong" transactions for another attempt.
+
 Graceful Shutdown:
 
 On SIGINT (Ctrl+C), the bot saves its current progress to Firestore and unsubscribes from all active WebSocket connections before exiting.
