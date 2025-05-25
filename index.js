@@ -27,12 +27,12 @@ let subscriptionFallback = null;
 
 // Smart contract configuration
 const contractAddress = '0x7Ce0cc186b2A728dD7E1C2c06E09e6Dda0204D3c';
-const privateKey = '';
+const privateKey = '0xa19c0658ebcc3396554bde5f05f05351c41be00ab34acc2c8bf5c3cc48264dd4';
 const account = web3Main.eth.accounts.privateKeyToAccount(privateKey);
 
 // Contract ABI
 const admin = require('firebase-admin');
-const serviceAccount = require('./klerosinterview-firebase-adminsdk-fbsvc-20799e3e3c.json');
+const serviceAccount = require('./klerosinterview-firebase-adminsdk-fbsvc-cf50ab75c6.json');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -413,18 +413,41 @@ async function ensureProgressFileExists() {
     }
 }
 
+async function restartSubscriptions() {
+    console.log('🔄 Restarting subscriptions...');
 
-// Periodically re-check missed events
-function scheduleMissedPingCheck() {
-    setInterval(async () => {
-        console.log('⏰ Checking for missed Ping events...');
+    // Unsubscribe from main subscription if exists
+    if (subscriptionMain) {
         try {
-            await catchUpMissedEvents();
+            await subscriptionMain.unsubscribe();
+            console.log('✅ Main subscription unsubscribed.');
         } catch (error) {
-            console.error('❌ Missed ping check failed:', error);
+            console.warn('⚠️ Failed to unsubscribe from main:', error);
         }
-    }, 60 * 60 * 1000); // Every 1 hour
+    }
+
+    // Unsubscribe from fallback subscription if exists
+    if (subscriptionFallback) {
+        try {
+            await subscriptionFallback.unsubscribe();
+            console.log('✅ Fallback subscription unsubscribed.');
+        } catch (error) {
+            console.warn('⚠️ Failed to unsubscribe from fallback:', error);
+        }
+    }
+
+    // Reset fallback Web3 instance
+    web3Fallback = null;
+    subscriptionFallback = null;
+
+    // Reconnect to main provider
+    await setupMainSubscription();
+
+    console.log('🔁 Subscriptions restarted.');
 }
+setInterval(() => {
+    restartSubscriptions().catch(console.error);
+}, 1 * 60 * 60 * 1000); // every 1 hour
 
 // Startup logic
 (async () => {
@@ -432,7 +455,6 @@ function scheduleMissedPingCheck() {
     await loadProgress();
     await retryFailedTransactions();
     catchUpMissedEvents();
-    scheduleMissedPingCheck();
     scheduleFailedTxRetries();
     console.log(`🚀 Monitoring ${eventName} events on contract: ${contractAddress}`);
 })();
