@@ -1,122 +1,136 @@
+# 🛎Ping/Pong Listener on Sepolia
+
+A reliable event-driven bot that listens for `Ping()` events from a verified contract on the Sepolia testnet and responds with a `pong()` transaction that includes the hash of the Ping event transaction. Built to be fault-tolerant and resume gracefully across crashes or network failures.
+
 ---
-# Ping-Pong Bot
 
-This project is a Node.js application that monitors "Ping" events on an Ethereum smart contract and automatically sends a "Pong" transaction in response. It's designed for high availability and resilience, featuring WebSocket provider failover, transaction retries, and progress persistence.
+## 🚀 Overview
 
-## Features
+The contract periodically emits `Ping()` events. The bot responds by calling `pong(bytes32 txHash)` with the transaction hash of each Ping.
 
-* **Real-time Event Monitoring:** Subscribes to `Ping` events from a specified smart contract.
-* **Automated "Pong" Response:** Automatically constructs and sends a `pong` transaction for each detected `Ping` event.
-* **WebSocket Provider Failover:** Seamlessly switches between Alchemy and Infura WebSocket providers if the primary connection experiences issues.
-* **Transaction Retries:** Implements an exponential backoff strategy for failed "Pong" transactions to maximize success rates.
-* **Persistent Progress Tracking:** Saves the last processed block and transaction hash to Firestore, enabling the bot to resume operations from where it left off after restarts.
-* **Missed Event Catch-up:** Periodically checks for and processes any `Ping` events that might have been missed due to downtime or network interruptions.
-* **Failed Transaction Logging:** Records unrecoverable failed transactions to a local file (`failed_transactions.json`) for later inspection and manual retry.
-* **Graceful Shutdown:** Ensures that progress is saved and subscriptions are properly closed on application termination (e.g., via `Ctrl+C`).
+---
 
-## Getting Started
 
-### Prerequisites
 
-* Node.js (LTS version recommended)
-* A Sepolia Ethereum account with some test ETH
-* Alchemy and Infura WebSocket API keys (or similar providers)
-* Firebase project setup with a service account key for Firestore access.
+## 🧠 Features & Reliability
 
-### Installation
+This bot addresses and **defends against the following problems**:
 
-1.  **Clone the repository:**
-    ```bash
-    git clone [repository_url]
-    cd [repository_name]
-    ```
+### ✅ **1. Start from a block and never miss a Ping**
 
-2.  **Install dependencies:**
-    ```bash
-    npm install web3 dotenv firebase-admin
-    ```
+- **Progress is stored in Firestore** (`progress/status`) with the last processed:
+  - Block number
+  - Ping transaction hash
+- On startup, missed events are recovered using `getPastEvents()` from the saved block onward.
+- Catches up all events **before** listening live.
 
-3.  **Environment Variables:**
-    Create a `.env` file in the project root and add your private key:
-    ```
-    PRIVATE_KEY="your_ethereum_private_key_here"
-    ```
-    **Note:** For production environments, consider more secure methods for handling private keys.
+### ✅ **2. Exactly one pong() per ping()**
 
-4.  **Firebase Service Account Key:**
-    Download your Firebase service account key JSON file and place it in the project root, named `klerosinterview-firebase-adminsdk-fbsvc-20799e3e3c.json`.
+- Keeps a **deduplicated Set** of processed transaction hashes in-memory (`processedTxs`)
+- Remembers the last processed tx and block for stateful consistency
+- Prevents reprocessing duplicate Pings even after restarts or failures
 
-5.  **Smart Contract ABI and Address:**
-    Ensure the `contractABI` array and `contractAddress` variable in `index.js` are correctly set for your deployed "Ping-Pong" contract.
+### ✅ **3. Handles WebSocket disconnects**
 
-### Running the Bot
+- Uses Alchemy WebSocket for real-time events
+- On disconnect or idle, the WS could silently die — we mitigate by:
+  - Using `getPastEvents()` to catch missed events
+  - Designing logic to resume processing without gaps
+
+### ✅ **4. Handles network failures and retries**
+
+- Includes **robust retry logic** with exponential backoff for failed transactions
+- Saves failed transactions to `failed_transactions.json` for future reprocessing if needed
+- Avoids overwhelming the network by spacing retries
+
+### ✅ **5. Prevents nonce collisions / failed txs after restart**
+
+- Uses **manual nonce management** with `pending` nonce reads
+- Processes txs sequentially to avoid parallel nonce conflicts
+- Resumes with latest nonce on restart
+
+---
+
+## 🔧 How to Run
+
+### 1. Clone & install dependencies
+
+```bash
+git clone https://github.com/YOUR_USERNAME/kleros-pingpong-bot.git
+cd kleros-pingpong-bot
+npm install
+```
+
+### 2. Environment setup
+
+Create a `.env` file with:
+
+```env
+ALCHEMY_API_KEY=v2MZeEDugE2xY38l3CN0Pqna1PIkxRnO
+```
+
+Add your Alchemy Sepolia API key, or replace it inline.
+
+### 3. Firebase setup
+
+Place your service account key file as:
+
+```bash
+./klerosinterview-firebase-adminsdk-fbsvc-cf50ab75c6.json
+```
+
+### 4. Start the bot
 
 ```bash
 node index.js
-
 ```
-Configuration
-providerAlchemy and providerInfura: Update these with your actual WebSocket URLs.
 
-contractAddress: The address of your deployed smart contract.
+The bot will:
+- Load last progress from Firestore
+- Catch up on missed Ping() events
+- Start listening via WebSocket
+- Call `pong(txHash)` for each new Ping
 
-privateKey: The private key of the Ethereum account that will send "Pong" transactions.
+---
 
-MAX_RETRIES: Maximum number of times to retry sending a "Pong" transaction.
+## 📁 Files
 
-FAILED_TX_FILE: Path to the file where failed transaction hashes are stored.
+- `index.js`: Main bot logic
+- `.env`: API key secrets
+- `failed_transactions.json`: Stores Pings that failed after max retries
+- `firebase-adminsdk-*.json`: Firebase service account key
 
-PROGRESS_FILE: (Deprecated in favor of Firestore) Path to the file for saving progress (now uses Firestore).
+---
 
-CHUNK_SIZE: (in catchUpMissedEvents) Determines the number of blocks to fetch at once when catching up on past events.
+## ⚠️ Error Handling Summary
 
-Retry Intervals: The scheduleFailedTxRetries and scheduleMissedPingCheck functions define how often the bot attempts to retry failed transactions and check for missed events, respectively.
+| Error Type                          | Mitigation                                                                 |
+|------------------------------------|----------------------------------------------------------------------------|
+| WebSocket dies silently            | Catch up logic via `getPastEvents()` handles gaps                          |
+| Network failure                    | Retry `pong()` tx with exponential backoff up to `MAX_RETRIES`            |
+| Nonce conflict                     | Sequential tx queue + manual nonce management avoids conflicts            |
+| Transaction dropped / not mined   | Retries; if persistent, logs tx hash to `failed_transactions.json`        |
+| Bot crash or restart              | Resumes from last saved progress in Firestore                             |
+| Block rollback / fork              | Handles idempotently using tx hashes                                       |
 
+---
 
-How it Works
+## 🧪 Testing
 
-Initialization:
+To test:
 
-Loads the last processed block and transaction hash from Firestore.
-Attempts to retry any previously failed transactions.
-Initializes a connection to the primary WebSocket provider (Alchemy).
+1. Deploy or use the provided contract.
+2. Call the `ping()` method.
+3. Wait for the bot to detect and reply with `pong(txHash)`.
+4. Confirm `pong()` was mined and matched the original ping txHash.
+5. Try killing and restarting the bot to confirm progress resumes correctly.
 
-Event Subscription:
-Subscribes to the Ping event on the specified smart contract.
-Event Handling (handlePingEvent):
+---
 
-When a Ping event is received, its transaction hash is added to a processing queue.
-Queue Processing (processTxQueue):
+## 📎 Notes
 
-Processes transactions from the queue in batches.
+- Ensure your bot address has enough Sepolia ETH from [https://sepoliafaucet.com/](https://sepoliafaucet.com/).
+- Contract source is verified on Etherscan: [View here](https://sepolia.etherscan.io/address/0xA7F42ff7433cB268dD7D59be62b00c30dEd28d3D#code)
+- You may redeploy the contract if needed.
 
-For each Ping transaction hash, it constructs and signs a pong transaction.
-
-Includes logic for EIP-1559 gas estimation if the network supports it.
-
-Sends the signed transaction to the Ethereum network.
-
-If a transaction fails, it retries with exponential backoff.
-
-If max retries are exceeded, the transaction hash is recorded in failed_transactions.json.
-
-Updates the last processed block and transaction hash in Firestore upon successful "Pong" 
-transmission.
-
-Failover (handleFallback, reconnectMain):
-
-
-If the primary WebSocket connection encounters an error or closes, the bot attempts to switch to the fallback provider (Infura).
-
-It then attempts to reconnect to the original main provider after a short delay.
-Catch-up (catchUpMissedEvents):
-
-Periodically queries past Ping events from the smart contract, starting from the last processed block, to ensure no events were missed during downtime.
-
-Failed Transaction Retries (retryFailedTransactions, scheduleFailedTxRetries):
-
-On startup and at regular intervals, the bot reads the failed_transactions.json file and re-queues any un-sent "Pong" transactions for another attempt.
-
-Graceful Shutdown:
-
-On SIGINT (Ctrl+C), the bot saves its current progress to Firestore and unsubscribes from all active WebSocket connections before exiting.
+---
