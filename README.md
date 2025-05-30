@@ -129,8 +129,4 @@ To test:
 
 ## 📎 Notes
 
-- Ensure your bot address has enough Sepolia ETH from [https://sepoliafaucet.com/](https://sepoliafaucet.com/).
-- Contract source is verified on Etherscan: [View here](https://sepolia.etherscan.io/address/0xA7F42ff7433cB268dD7D59be62b00c30dEd28d3D#code)
-- You may redeploy the contract if needed.
-
 ---
